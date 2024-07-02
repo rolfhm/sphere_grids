@@ -70,6 +70,30 @@ class Point:
             return Point(d1, self.lon - theta3)
 
 
+    def compute_distance(self, other):
+        """
+        Compute cosine of distance between self and other,
+        using the north pole as a helping point
+        """
+        return cos(self.lat)*cos(other.lat) + sin(self.lat)*sin(other.lat)*cos(abs(self.lon-other.lon))
+
+
+    def compute_angle(self, other):
+        """
+        Compute cosine of the angle between the north pole,
+        self, and other
+        cosd is the cosine of distance between self and other
+        """
+
+        if self.lon == other.lon:
+            if self.lat < other.lat:
+                return -1.0
+            return 1.0
+
+        cosd = self.compute_distance(other)
+        return (cos(other.lat) - cos(self.lat)*cosd)/(sin(self.lat)*sin(acos(cosd)))
+
+
     def get_deg_lat(self):
         return 90 - 360*self.lat/(2*pi)
 
@@ -164,78 +188,91 @@ class Grid:
 
 
 
+
 class Edge:
 
-    def __init__(self, point1, point2):
+    def __init__(self, pointx, pointy):
+        """
+        Initialise edge between pointx and pointy, 
+        store the westernmost as point_1 and the easternmost point as point_2,
+        and store the cosine of the angle at the western point
+        If the points are equally far west,
+        store the northernmost point in point_1
+        """
 
-        if point1.lon < point2.lon:
-            wpoint = point1
-            epoint = point2
+        if pointx.lon == pointy.lon:
+            self.aligned = True
+
+            if pointx.lat < pointy.lat:
+                self.point_1 = pointx
+                self.point_2 = pointy
+            else:
+                self.point_1 = pointy
+                self.point_2 = pointx
+
         else:
-            wpoint = point2
-            epoint = point1
+            self.aligned = False
 
-        self.lons = (wpoint.lon, epoint.lon)
-        self.lats = (wpoint.lat, epoint.lat)
+            if pointx.lon < pointy.lon:
+                self.point_1 = pointx
+                self.point_2 = pointy
+            else:
+                self.point_1 = pointy
+                self.point_2 = pointx
 
-        cosd = cos(wpoint.lat)*cos(epoint.lat) + sin(wpoint.lat)*sin(epoint.lat)*cos(epoint.lon-wpoint.lon)
-
-        self.cos = (cos(epoint.lat) - cos(wpoint.lat)*cosd)/(sin(wpoint.lat)*sin(acos(cosd)))
+        self.cos_1 = self.point_1.compute_angle(self.point_2)
 
 
-def compute_equidistant_point(lon1, lat1, lon2, lat2, d, right):
-    """
-    Determine a point that is distance d from point 1 and point 2
-    If right is true, 
-    the point will be to the right of the line between point 1 and point 2,
-    otherwise, it will be to the left
-    """
+    def point_crossing(self, point):
+        """
+        Check if a line between the north pole and point crosses the edge
+        If point is on the edge, return True
+        """
+        if self.aligned:
+            if (point.lon == self.point_1.lon and
+                point.lat > self.point_1.lat and 
+                point.lat < self.point_2.lat):
+                return True
+            return False
+            
 
-    if right:
-        sign = 1
-    else:
-        sign = -1
-
-    cosd3 = cos(lat1)*cos(lat2) + sin(lat1)*sin(lat2)*cos(lon1-lon2)
-    sind3 = sin(acos(cosd3))
-
-    costheta1p  = (cos(lat2) - cos(lat1)*cosd3)/(sin(lat1)*sind3)
-    costheta1pp = (cos(d) - cos(d)*cosd3)/(sin(d)*sind3)
-
-    theta1p  = acos(costheta1p)
-    theta1pp = acos(costheta1pp)
-
-    theta1 = acos(costheta1p) + sign*acos(costheta1pp)
-
-    coslat3 = cos(lat1)*cos(d) + sin(lat1)*sin(d)*cos(theta1)
-    lat3 = acos(coslat3)
-
-    coslambda3 = (cos(d)-cos(lat1)*coslat3)/(sin(lat1)*sin(lat3))
-
-    lon3 = min(lon1, lon2) + acos(coslambda3)
-
-    return lon3, lat3
-
+        if (point.lon > self.point_1.lon or point.lon < self.point_2.lon):
+            if (point.lat > self.point_1.lat and point.lat > self.point_2.lat):
+                return True
+            elif (point.lat > self.point_1.lat or point.lat > self.point_2.lat):
+                if self.point_1.compute_angle(point) < self.cos_1:
+                    print()
+                    print(self.point_1.lon)
+                    print(point.lon)
+                    print(self.point_1.compute_angle(point))
+                    print(self.cos_1)
+                    print()
+                    return True
+        return False
 
 
 if __name__ == "__main__":
 
-    nx = 7
-    ny = 7
+    nx = 3
+    ny = 3
 
-    distance = 2.5
+    distance = 250
     r  = 6371.0088
 
-    anglex = 130
+    anglex = 135
     angley = 90
 
     startlatp   = 71
     startlatpp  = 38
     startlatppp = 5
 
-    startlonp   = 20
-    startlonpp  = 40
-    startlonppp = 31
+#    startlonp   = 20
+#    startlonpp  = 40
+#    startlonppp = 31
+
+    startlonp   = 0
+    startlonpp  = 0
+    startlonppp = 0
 
     startpoint = Point.min_sec(startlatp, startlatpp, startlatppp, startlonp, startlonpp, startlonppp)
 
@@ -244,5 +281,35 @@ if __name__ == "__main__":
 
     grid = Grid(nx, ny, distance/r, xangle, yangle, startpoint)
 
-    grid.print_lat_lon()
+#    grid.print_lat_lon()
+
+    f_point = grid.points[0]
+    l_point = grid.points[-1]
+
+    corner1 = grid.points[6]
+    corner2 = grid.points[-3]
+
+    center = grid.points[4]
+
+    edge = Edge(f_point, corner1)
+
+    print()
+    for point in grid.points:
+        if point.lon > pi:
+            print("{:11.4f}{:11.4f}".format(point.lat, point.lon - 2*pi))
+        else:
+            print("{:11.4f}{:11.4f}".format(point.lat, point.lon))
+        
+    print()
+    print(edge.point_1, edge.point_1.get_deg_lat(), edge.point_1.get_deg_lon())
+    print(edge.point_2, edge.point_2.get_deg_lat(), edge.point_2.get_deg_lon())
+    print(edge.cos_1)
+    print(acos(edge.cos_1), 360*acos(edge.cos_1)/(2*pi))
+    print()
+    print(edge.point_crossing(l_point))
+    print(edge.point_crossing(corner2))
+    print(edge.point_crossing(center))
+    print()
+
+
 
