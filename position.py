@@ -122,14 +122,46 @@ class Angle:
 
 class Grid:
 
-    def __init__(nx, ny, distance, xangle, yangle, refpoint):
-
+    def __init__(self, nx, ny, distance, xangle, yangle, refpoint):
+        """
+        Store the parameters of the grid and generate the gridpoints
+        """
         self.nx = nx
         self.ny = ny
         self.distance = distance
         self.xangle = xangle
         self.yangle = yangle
         self.refpoint = refpoint
+
+        self.generate_grid_points()
+
+
+    def generate_grid_points(self):
+        """
+        Generate the points in the grid
+        """
+        points = [self.refpoint]
+        for nn in range(1,self.ny):
+            points += [points[-1].compute_point(self.distance, self.yangle)]
+
+        for n in range(1,self.nx):
+            points += [points[-self.ny].compute_point(self.distance, self.xangle)]
+            for nn in range(1,self.ny):
+                points += [points[-1].compute_point(self.distance, self.yangle)]
+
+        self.points = points
+
+
+    def print_lat_lon(self):
+        """
+        Print latitude and longitude of the gridpoints
+        """
+        for point in self.points:
+            lat = point.get_deg_lat()
+            lon = point.get_deg_lon()
+
+            print("{:11.4f}{:11.4f}".format(lat, lon))
+
 
 
 class Edge:
@@ -185,25 +217,6 @@ def compute_equidistant_point(lon1, lat1, lon2, lat2, d, right):
     return lon3, lat3
 
 
-def generate_grid(nx, ny, distance, xangle, yangle, startpoint):
-
-    points = [startpoint]
-    for nn in range(1,ny):
-        points += [points[-1].compute_point(distance, yangle)]
-
-    for n in range(1,nx):
-        points += [points[-ny].compute_point(distance, xangle)]
-        for nn in range(1,ny):
-            points += [points[-1].compute_point(distance, yangle)]
-
-
-    for point in points:
-        lat = point.get_deg_lat()
-        lon = point.get_deg_lon()
-
-        print("{:11.4f}{:11.4f}".format(lon, lat))
-
-
 
 if __name__ == "__main__":
 
@@ -229,5 +242,7 @@ if __name__ == "__main__":
     xangle = Angle.degrees(anglex)
     yangle = Angle.degrees(anglex + angley)
 
-    generate_grid(nx, ny, distance/r, xangle, yangle, startpoint)
+    grid = Grid(nx, ny, distance/r, xangle, yangle, startpoint)
+
+    grid.print_lat_lon()
 
