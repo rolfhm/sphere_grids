@@ -1,5 +1,6 @@
-
 from math import pi, cos, sin, acos
+from itertools import pairwise
+from sys import exit
 
 class Point:
 
@@ -35,6 +36,7 @@ class Point:
         Initialise point based on latitude and longitude in degrees, minutes, and seconds
         """
         return cls(2*pi*(90 - (lat + latp/60 + latpp/3600))/360, 2*pi*(lon + lonp/60 + lonpp/3600)/360)
+
 
     def compute_point(self, d3, theta1):
         """
@@ -100,8 +102,11 @@ class Point:
     def get_deg_lon(self):
         return 360*self.lon/(2*pi)
 
+    def __eq__(self, other):
+        return (self.lon == other.lon and self.lat == other.lat)
+
     def __repr__(self):
-        return str((self.lat, self.lon))
+        return "({:8.6f}, {:8.6f})".format(self.lat, self.lon)
 
 
 class Angle:
@@ -176,6 +181,20 @@ class Grid:
         self.points = points
 
 
+    def filter(self, polygon, inside=True):
+        """
+        Filter out points in grid inside or outside the polygon
+        depending on whether the points are inside or outside the polygon
+        """
+
+        filtered = []
+        for point in self.points:
+            if (polygon.inside(point) == inside):
+                filtered += [point]
+
+        self.points = filtered
+
+
     def print_lat_lon(self):
         """
         Print latitude and longitude of the gridpoints
@@ -187,40 +206,59 @@ class Grid:
             print("{:11.4f}{:11.4f}".format(lat, lon))
 
 
+    def __repr__(self):
+        string = str(self.points[0])
+        for point in self.points[1:]:
+            string += '\n' + str(point)
+
+        return(string)
 
 
 class Edge:
 
     def __init__(self, pointx, pointy):
         """
-        Initialise edge between pointx and pointy, 
-        store the westernmost as point_1 and the easternmost point as point_2,
+        Initialise edge between pointx and pointy,
+        store the westernmost as point1 and the easternmost point as point2,
         and store the cosine of the angle at the western point
         If the points are equally far west,
-        store the northernmost point in point_1
+        store the northernmost point in point1
         """
 
         if pointx.lon == pointy.lon:
             self.aligned = True
 
             if pointx.lat < pointy.lat:
-                self.point_1 = pointx
-                self.point_2 = pointy
+                self.point1 = pointx
+                self.point2 = pointy
             else:
-                self.point_1 = pointy
-                self.point_2 = pointx
+                self.point1 = pointy
+                self.point2 = pointx
 
         else:
             self.aligned = False
 
             if pointx.lon < pointy.lon:
-                self.point_1 = pointx
-                self.point_2 = pointy
+                self.point1 = pointx
+                self.point2 = pointy
             else:
-                self.point_1 = pointy
-                self.point_2 = pointx
+                self.point1 = pointy
+                self.point2 = pointx
 
-        self.cos_1 = self.point_1.compute_angle(self.point_2)
+        self.cos1 = self.point1.compute_angle(self.point2)
+
+
+    def lon1(self):
+        return self.point1.lon
+
+    def lon2(self):
+        return self.point2.lon
+
+    def lat1(self):
+        return self.point1.lat
+
+    def lat2(self):
+        return self.point2.lat
 
 
     def point_crossing(self, point):
@@ -229,26 +267,127 @@ class Edge:
         If point is on the edge, return True
         """
         if self.aligned:
-            if (point.lon == self.point_1.lon and
-                point.lat > self.point_1.lat and 
-                point.lat < self.point_2.lat):
+            if (point.lon == self.lon1() and
+                point.lat > self.lat1() and
+                point.lat < self.lat2()):
                 return True
             return False
-            
 
-        if (point.lon > self.point_1.lon or point.lon < self.point_2.lon):
-            if (point.lat > self.point_1.lat and point.lat > self.point_2.lat):
+
+        if (point.lon > self.lon1() and point.lon < self.lon2()):
+            if (point.lat > self.lat1() and point.lat > self.lat2()):
                 return True
-            elif (point.lat > self.point_1.lat or point.lat > self.point_2.lat):
-                if self.point_1.compute_angle(point) < self.cos_1:
-                    print()
-                    print(self.point_1.lon)
-                    print(point.lon)
-                    print(self.point_1.compute_angle(point))
-                    print(self.cos_1)
-                    print()
+            elif (point.lat > self.lat1() or point.lat > self.lat2()):
+                if self.point1.compute_angle(point) < self.cos1:
                     return True
         return False
+
+
+    def crossing(self, other):
+        """
+        Check if a self crosses with other
+        First, check if longitudes and latitudes are overlapping,
+        then check that the self.cos1 is between the angles
+        from self.point1 to other.point1 and other.point2
+        """
+        if (self.point1 == other.point1 or
+            self.point1 == other.point2 or
+            self.point2 == other.point1 or
+            self.point2 == other.point2):
+            return False
+
+        if (self.lon1() < other.lon2() and self.lon2() > other.lon1()):
+            if (max(self.lat1(), self.lat2()) > min(other.lat1(), other.lat2()) and
+                min(self.lat1(), self.lat2()) < max(other.lat1(), other.lat2())):
+
+                    if (self.lon1() < other.lon1()):
+                        angle1 = self.point1.compute_angle(other.point1)
+                        angle2 = self.point1.compute_angle(other.point2)
+                        cos1 = self.cos1
+                    else:
+                        angle1 = other.point1.compute_angle(self.point1)
+                        angle2 = other.point1.compute_angle(self.point2)
+                        cos1 = other.cos1
+
+                    if (cos1 < max(angle1, angle2) and
+                        cos1 > min(angle1, angle2)):
+                        return True
+        return False
+
+
+    def __repr__(self):
+        return str(self.point1) + ', ' + str(self.point2)
+
+
+class Polygon:
+
+    def __init__(self, points):
+        """
+        Initialise the polygon based on corner points
+        Store the edges in a list
+        and the corners that need to be considered
+        when determining if a point is inside the polygon or not
+        """
+
+        edges = []
+        for point1, point2 in pairwise(points):
+            edges += [Edge(point1, point2)]
+        edges += [Edge(points[-1],points[0])]
+
+        for i,edge in enumerate(edges[:-1]):
+            for edgex in edges[i+1:]:
+                if edge.crossing(edgex):
+                    exit('crossing edges')
+
+        self.edges = edges
+
+        crosspoints = []
+        for i in range(len(points)):
+            if ((points[i-1].lon < points[i].lon and points[i].lon < points[(i+1)%len(points)].lon) or
+                (points[i-1].lon > points[i].lon and points[i].lon > points[(i+1)%len(points)].lon)):
+                crosspoints += [points[i]]
+
+        self.crosspoints = crosspoints
+
+
+    @classmethod
+    def min_sec(cls, latp, latpp, latppp, lonp, lonpp, lonppp):
+        """
+        Initialise polygon based on latitude and longitude in degrees, minutes, and seconds
+        """
+        points = []
+        for ilatp, ilatpp, ilatppp, ilonp, ilonpp, ilonppp in zip(latp, latpp, latppp, lonp, lonpp, lonppp):
+            points += [Point.min_sec(ilatp, ilatpp, ilatppp, ilonp, ilonpp, ilonppp)]
+
+        return cls(points)
+
+
+    def inside(self, point):
+        """
+        Determine if point is inside or outside self by checking
+        if a line from the north pole crosses edges and corners
+        an odd or even number of times
+        """
+        crossings = 0
+        for edge in self.edges:
+            if edge.point_crossing(point):
+                crossings += 1
+
+        for crosspoint in self.crosspoints:
+            if (point.lon == crosspoint.lon and point.lat >= crosspoint.lat):
+                crossings += 1
+
+        if crossings%2 == 0:
+            return False
+        return True
+
+
+    def __repr__(self):
+        string = str(self.edges[0])
+        for edge in self.edges[1:]:
+            string += '\n' + str(edge)
+
+        return(string)
 
 
 if __name__ == "__main__":
@@ -256,23 +395,19 @@ if __name__ == "__main__":
     nx = 3
     ny = 3
 
-    distance = 250
+    distance = 2.5
     r  = 6371.0088
 
-    anglex = 135
+    anglex = 90
     angley = 90
 
     startlatp   = 71
     startlatpp  = 38
     startlatppp = 5
 
-#    startlonp   = 20
-#    startlonpp  = 40
-#    startlonppp = 31
-
-    startlonp   = 0
-    startlonpp  = 0
-    startlonppp = 0
+    startlonp   = 20
+    startlonpp  = 40
+    startlonppp = 31
 
     startpoint = Point.min_sec(startlatp, startlatpp, startlatppp, startlonp, startlonpp, startlonppp)
 
@@ -281,35 +416,14 @@ if __name__ == "__main__":
 
     grid = Grid(nx, ny, distance/r, xangle, yangle, startpoint)
 
-#    grid.print_lat_lon()
+    sorvest_latp   = [57, 57, 57, 56, 56, 56, 56]
+    sorvest_latpp  = [13, 13,  0, 54, 44, 35, 28]
+    sorvest_latppp = [29, 19,  1, 12, 17, 28, 13]
 
-    f_point = grid.points[0]
-    l_point = grid.points[-1]
+    sorvest_lonp   = [ 4,  4,  4,  5,  5,  5,  4]
+    sorvest_lonpp  = [26, 31, 54, 20, 29,  1, 35]
+    sorvest_lonppp = [54, 11,  9, 45, 51, 55, 34]
 
-    corner1 = grid.points[6]
-    corner2 = grid.points[-3]
+    sorvest = Polygon.min_sec(sorvest_latp, sorvest_latpp, sorvest_latppp, sorvest_lonp, sorvest_lonpp, sorvest_lonppp)
 
-    center = grid.points[4]
-
-    edge = Edge(f_point, corner1)
-
-    print()
-    for point in grid.points:
-        if point.lon > pi:
-            print("{:11.4f}{:11.4f}".format(point.lat, point.lon - 2*pi))
-        else:
-            print("{:11.4f}{:11.4f}".format(point.lat, point.lon))
-        
-    print()
-    print(edge.point_1, edge.point_1.get_deg_lat(), edge.point_1.get_deg_lon())
-    print(edge.point_2, edge.point_2.get_deg_lat(), edge.point_2.get_deg_lon())
-    print(edge.cos_1)
-    print(acos(edge.cos_1), 360*acos(edge.cos_1)/(2*pi))
-    print()
-    print(edge.point_crossing(l_point))
-    print(edge.point_crossing(corner2))
-    print(edge.point_crossing(center))
-    print()
-
-
-
+    print(sorvest)
