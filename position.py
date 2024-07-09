@@ -1,6 +1,9 @@
 from math import pi, cos, sin, acos
 from itertools import pairwise
 from sys import exit
+from re import sub
+
+r  = 6371.0088
 
 class Point:
 
@@ -80,7 +83,7 @@ class Point:
         return cos(self.lat)*cos(other.lat) + sin(self.lat)*sin(other.lat)*cos(abs(self.lon-other.lon))
 
 
-    def compute_angle(self, other):
+    def compute_cos(self, other):
         """
         Compute cosine of the angle between the north pole,
         self, and other
@@ -94,6 +97,30 @@ class Point:
 
         cosd = self.compute_distance(other)
         return (cos(other.lat) - cos(self.lat)*cosd)/(sin(self.lat)*sin(acos(cosd)))
+
+
+    def compute_angle(self, other):
+        """
+        Compute the angle between the north pole, self, and other
+        """
+
+        if self.lon == other.lon:
+            if self.lat < other.lat:
+                return Angle(0.0)
+            return Angle(pi)
+
+        cos = self.compute_cos(other)
+
+        if self.lon < other.lon:
+            return Angle(acos(cos))
+        return Angle(2*pi - acos(cos))
+
+
+    def lon_lat(self):
+        """
+        Print longitude and latitude of the gridpoint
+        """
+        return "{:11.4f}{:11.4f}".format(self.get_deg_lon(), self.get_deg_lat())
 
 
     def get_deg_lat(self):
@@ -139,11 +166,28 @@ class Angle:
         """
         return cls(2*pi*angle/360)
 
-    def get_angle_deg(self):
-        return 360*self.lon/(2*pi)
+    def get_abs(self):
+        if self.east:
+            return self.angle
+        return 2*pi - self.angle
+
+    def get_deg(self):
+        return (360*self.get_abs())/(2*pi)
 
     def get_east(self):
         return self.east
+
+    def add(self, other):
+        """
+        Add other to self and return new angle
+        """
+        return Angle(self.get_abs() + other.get_abs())
+
+    def add_degree(self, angle):
+        """
+        Add other to self and return new angle
+        """
+        return self.add(Angle.degrees(angle))
 
     def __repr__(self):
         return str((self.angle, self.east))
@@ -151,13 +195,14 @@ class Angle:
 
 class Grid:
 
-    def __init__(self, nx, ny, distance, xangle, yangle, refpoint):
+    def __init__(self, nx, ny, dx, dy, xangle, yangle, refpoint):
         """
         Store the parameters of the grid and generate the gridpoints
         """
         self.nx = nx
         self.ny = ny
-        self.distance = distance
+        self.dx = dx
+        self.dy = dy
         self.xangle = xangle
         self.yangle = yangle
         self.refpoint = refpoint
@@ -171,12 +216,12 @@ class Grid:
         """
         points = [self.refpoint]
         for nn in range(1,self.ny):
-            points += [points[-1].compute_point(self.distance, self.yangle)]
+            points += [points[-1].compute_point(self.dy, self.yangle)]
 
         for n in range(1,self.nx):
-            points += [points[-self.ny].compute_point(self.distance, self.xangle)]
+            points += [points[-self.ny].compute_point(self.dx, self.xangle)]
             for nn in range(1,self.ny):
-                points += [points[-1].compute_point(self.distance, self.yangle)]
+                points += [points[-1].compute_point(self.dy, self.yangle)]
 
         self.points = points
 
@@ -195,21 +240,19 @@ class Grid:
         self.points = filtered
 
 
-    def print_lat_lon(self):
+    def lon_lat(self):
         """
-        Print latitude and longitude of the gridpoints
+        Return longitude and latitude of points
         """
-        for point in self.points:
-            lat = point.get_deg_lat()
-            lon = point.get_deg_lon()
-
-            print("{:11.4f}{:11.4f}".format(lat, lon))
-
-
-    def __repr__(self):
-        string = str(self.points[0])
+        string = self.points[0].lon_lat()
         for point in self.points[1:]:
-            string += '\n' + str(point)
+            string += '\n' + point.lon_lat()
+        return string
+
+        def __repr__(self):
+            string = str(self.points[0])
+            for point in self.points[1:]:
+                string += '\n' + str(point)
 
         return(string)
 
@@ -245,7 +288,7 @@ class Edge:
                 self.point1 = pointy
                 self.point2 = pointx
 
-        self.cos1 = self.point1.compute_angle(self.point2)
+        self.cos1 = self.point1.compute_cos(self.point2)
 
 
     def lon1(self):
@@ -278,7 +321,7 @@ class Edge:
             if (point.lat > self.lat1() and point.lat > self.lat2()):
                 return True
             elif (point.lat > self.lat1() or point.lat > self.lat2()):
-                if self.point1.compute_angle(point) < self.cos1:
+                if self.point1.compute_cos(point) < self.cos1:
                     return True
         return False
 
@@ -301,18 +344,25 @@ class Edge:
                 min(self.lat1(), self.lat2()) < max(other.lat1(), other.lat2())):
 
                     if (self.lon1() < other.lon1()):
-                        angle1 = self.point1.compute_angle(other.point1)
-                        angle2 = self.point1.compute_angle(other.point2)
+                        angle1 = self.point1.compute_cos(other.point1)
+                        angle2 = self.point1.compute_cos(other.point2)
                         cos1 = self.cos1
                     else:
-                        angle1 = other.point1.compute_angle(self.point1)
-                        angle2 = other.point1.compute_angle(self.point2)
+                        angle1 = other.point1.compute_cos(self.point1)
+                        angle2 = other.point1.compute_cos(self.point2)
                         cos1 = other.cos1
 
                     if (cos1 < max(angle1, angle2) and
                         cos1 > min(angle1, angle2)):
                         return True
         return False
+
+
+    def lon_lat(self):
+        """
+        Print longitude and latitude of the gridpoints
+        """
+        return self.point1.lon_lat() + ',' + self.point2.lon_lat()
 
 
     def __repr__(self):
@@ -340,6 +390,7 @@ class Polygon:
                     exit('crossing edges')
 
         self.edges = edges
+        self.points = points
 
         crosspoints = []
         for i in range(len(points)):
@@ -381,6 +432,14 @@ class Polygon:
             return False
         return True
 
+    def lon_lat(self):
+        """
+        Print longitude and latitude of the points
+        """
+        string = self.points[0].lon_lat()
+        for point in self.points[1:]:
+            string += '\n' + point.lon_lat()
+        return string
 
     def __repr__(self):
         string = str(self.edges[0])
@@ -389,41 +448,13 @@ class Polygon:
 
         return(string)
 
+    def Diana_print(self):
+        """
+        Print points in a format easy to paste into Diana .kml files
+        """
+        string = ""
+        for point in self.points:
+            string += sub("\s+", ",", point.lon_lat().strip())
+            string += "\n"
+        return string
 
-if __name__ == "__main__":
-
-    nx = 3
-    ny = 3
-
-    distance = 2.5
-    r  = 6371.0088
-
-    anglex = 90
-    angley = 90
-
-    startlatp   = 71
-    startlatpp  = 38
-    startlatppp = 5
-
-    startlonp   = 20
-    startlonpp  = 40
-    startlonppp = 31
-
-    startpoint = Point.min_sec(startlatp, startlatpp, startlatppp, startlonp, startlonpp, startlonppp)
-
-    xangle = Angle.degrees(anglex)
-    yangle = Angle.degrees(anglex + angley)
-
-    grid = Grid(nx, ny, distance/r, xangle, yangle, startpoint)
-
-    sorvest_latp   = [57, 57, 57, 56, 56, 56, 56]
-    sorvest_latpp  = [13, 13,  0, 54, 44, 35, 28]
-    sorvest_latppp = [29, 19,  1, 12, 17, 28, 13]
-
-    sorvest_lonp   = [ 4,  4,  4,  5,  5,  5,  4]
-    sorvest_lonpp  = [26, 31, 54, 20, 29,  1, 35]
-    sorvest_lonppp = [54, 11,  9, 45, 51, 55, 34]
-
-    sorvest = Polygon.min_sec(sorvest_latp, sorvest_latpp, sorvest_latppp, sorvest_lonp, sorvest_lonpp, sorvest_lonppp)
-
-    print(sorvest)
